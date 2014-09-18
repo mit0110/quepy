@@ -13,6 +13,8 @@ Implements the Quepy Application API
 
 import logging
 from importlib import import_module
+from refo import Star, Any
+from refo.patterns import Pattern
 from types import ModuleType
 
 from quepy import settings
@@ -51,6 +53,18 @@ def question_sanitize(question):
     return question
 
 
+def refo_subpatterns( regex):
+    patterns = []
+    attributes = [a for a in dir(regex) if not a.startswith('_')]
+    for attribute in attributes:
+        attribute = getattr(regex, attribute)
+        if isinstance(attribute, Pattern):
+            patterns += refo_subpatterns(attribute)
+            print patterns
+            patterns.append(attribute)
+    return patterns
+
+
 class QuepyApp(object):
     """
     Provides the quepy application API.
@@ -75,6 +89,11 @@ class QuepyApp(object):
         if not self.language:
             raise ValueError("Missing configuration for language")
 
+        self.get_rules()
+        self.get_partial_rules()
+        self.rules.sort(key=lambda x: x.weight, reverse=True)
+
+    def get_rules(self):
         self.rules = []
         for element in dir(self._parsing_module):
             element = getattr(self._parsing_module, element)
@@ -87,7 +106,13 @@ class QuepyApp(object):
             except TypeError:
                 continue
 
-        self.rules.sort(key=lambda x: x.weight, reverse=True)
+    def get_partial_rules(self):
+        self.partial_rules = []
+        for rule in self.rules:
+            subpatterns = refo_subpatterns(rule.regex)
+            for pattern in subpatterns:
+                new_regex = Star(Any()) + pattern + Star(Any())
+                self.partial_rules.append(new_regex)
 
     def get_query(self, question):
         """
