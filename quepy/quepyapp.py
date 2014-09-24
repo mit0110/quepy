@@ -14,12 +14,12 @@ Implements the Quepy Application API
 import logging
 from importlib import import_module
 from refo import Star, Any
-from refo.patterns import Pattern
+from refo.patterns import Pattern, Question
 from types import ModuleType
 
 from quepy import settings
 from quepy import generation
-from quepy.parsing import QuestionTemplate
+from quepy.parsing import QuestionTemplate, Particle
 from quepy.tagger import get_tagger, TaggingError
 from quepy.encodingpolicy import encoding_flexible_conversion
 
@@ -53,16 +53,44 @@ def question_sanitize(question):
     return question
 
 
-def refo_subpatterns( regex):
+def refo_subpatterns(regex, level=0):
     patterns = []
+    # print level * '\t', level, regex
+    if isinstance(regex, Particle):
+        # regex = regex.regex
+        return patterns
     attributes = [a for a in dir(regex) if not a.startswith('_')]
     for attribute in attributes:
         attribute = getattr(regex, attribute)
-        if isinstance(attribute, Pattern):
-            patterns += refo_subpatterns(attribute)
-            print patterns
-            patterns.append(attribute)
+        if not isinstance(attribute, list):  # Concatenation of two or more refos.
+            attribute = [attribute]
+        for at in attribute:
+            if isinstance(at, Question):
+                at = at.arg
+            if isinstance(at, Pattern):
+                patterns += refo_subpatterns(at, level+1)
+                patterns.append(at)
     return patterns
+
+
+# Very very hacky, the correct way is to implement the __eq__ function
+# for the refos.
+def compare_patterns(pattern1, pattern2):
+    if type(pattern1) != type(pattern2):
+        return False
+    return repr(pattern1) == repr(pattern2)
+
+
+def find_pattern(pattern, iterable, f):
+    for i in iterable:
+        if f(pattern, i):
+            return True
+    return False
+
+
+def remove_duplicates(iterable, f=compare_patterns):
+    return [i for pos, i in enumerate(iterable)
+            if not find_pattern(i, iterable[:pos], f)]
 
 
 class QuepyApp(object):
@@ -97,7 +125,6 @@ class QuepyApp(object):
         self.rules = []
         for element in dir(self._parsing_module):
             element = getattr(self._parsing_module, element)
-
             try:
                 if issubclass(element, QuestionTemplate) and \
                         element is not QuestionTemplate:
@@ -113,6 +140,7 @@ class QuepyApp(object):
             for pattern in subpatterns:
                 new_regex = Star(Any()) + pattern + Star(Any())
                 self.partial_rules.append(new_regex)
+        self.partial_rules = remove_duplicates(self.partial_rules)
 
     def get_query(self, question):
         """
